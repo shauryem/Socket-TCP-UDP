@@ -1,131 +1,110 @@
+import java.util.*;
+import java.net.*;
 import java.io.*;
-import java.net.Socket;
+import java.lang.*;
 
-/**
- * Created by Arthur on 4/21/18.
- * Lines with a '*' comment have been adapted from course lecture slides
- */
-public class client_java_tcp {
 
-    private BufferedReader input;
-    private Socket socket;
+class client_java_tcp{
+    private String serverIPAddress;
+    private Integer serverPortNumber;
+    private ObjectInputStream inStream;
+    private ObjectOutputStream outStream;
+    private Socket tcpSocket;
+    private static Scanner scanner;
 
-    public client_java_tcp() {
-        input = new BufferedReader(new InputStreamReader(System.in));  // *
+    public void connect(String IPAddress, Integer port, String command, String fileName){
+        String fromServer = "";
+        this.serverPortNumber = port;
+        this.serverIPAddress = IPAddress;
+        try{
+            this.tcpSocket = new Socket(this.serverIPAddress, this.serverPortNumber);
+            //System.out.println("Socket created successfully");
+        }catch(Exception e){
+            //e.printStackTrace();
+            System.out.println("Could not connect to server");
+        }
+
+        try{
+            //System.out.println("Setting up streams");
+            this.outStream = new ObjectOutputStream(this.tcpSocket.getOutputStream());
+            this.inStream = new ObjectInputStream(this.tcpSocket.getInputStream());
+
+            //System.out.print("Streams set up, about to write command:");
+            //System.out.println(command);
+            this.outStream.writeObject(command);
+            //System.out.println("Wrote command to server");
+            fromServer = (String) this.inStream.readObject();
+
+            //System.out.print("Message received: ");
+            //System.out.println(fromServer);
+
+            //writes output to file instead of standard input.
+            BufferedWriter toFile = new BufferedWriter(new FileWriter(fileName, true));
+            toFile.write(fromServer);
+            toFile.close();
+
+        }catch(Exception e){
+            //e.printStackTrace();
+            System.out.println("Error communicating with server");
+        }
     }
 
-    /**
-     * Gather connection info from user and establish socket connection
-     * @return whether or not connection was successful
-     * @throws IOException if cannot read input from user (does NOT throw exception for connection failure)
-     */
-    public boolean connect() throws IOException {
-        // get hostname
-        System.out.println("Enter server name or IP address:  ");
-        String hostname = input.readLine();
-        if (!validateIp(hostname)) {
-            System.err.println("Could not connect to server.");
-            return false;
-        }
 
-        // get port
-        System.out.println("Enter port:  ");
-        String portString = input.readLine();
-        int port;
-        try {
-            port = Integer.parseInt(portString);
-        } catch (NumberFormatException e) {
-            System.err.println("Invalid port number.");
-            return false;
-        }
-        if (!validatePort(port)) {
-            System.err.println("Invalid port number.");
-            return false;
-        }
-
-        // connect
-        try {
-            socket = new Socket(hostname, port); // * client socket for server connection
-        } catch (IOException e) {
-            System.err.println("Could not connect to server.");
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Get command from user, send to server, and print response
-     * @throws IOException if anything goes wrong
-     */
-    public void sendCommand() {
-        BufferedReader response;
+    public static void main(String args[]){      
+        String IPAddress = "";
+        Integer port;
         String command;
-        try {
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream()); // *
-            response = new BufferedReader(new InputStreamReader(socket.getInputStream()));  // *
+        String fileName = "client.txt";
+        String COULD_NOT_CONNECT = "Could not connect to server.";
+        String INVALID_PORT = "Invalid port number";
+        String FAIL_SEND = "Failed to send command. Terminating.";
+        String CANNOT_FETCH = "Could not fetch file";
+        
+        System.out.print("Enter server name or IP address: ");
+        scanner = new Scanner(System.in);
+        IPAddress = scanner.nextLine();
+        ArrayList<String> ipParse = new ArrayList<String>();
 
-            // get command from user
-            System.out.println("Enter command: ");
-            command = input.readLine();
-            System.out.println();
-
-            // send it
-            out.writeBytes(command+"\n");  // *
-        } catch (IOException e) {
-            System.err.println("Failed to send command. Terminating.");
-            return;
+        String[] ipSplit = IPAddress.split("\\.");
+        for(String c : ipSplit){
+            ipParse.add(c);
         }
 
-        try {
-            // save response to file
-            int filesize = Integer.parseInt(response.readLine());
-            String filename = parseFileName(command);
-            saveResponse(filename, filesize);
-            System.out.println("File "+filename + " saved.");
-            socket.close(); // close connection
-        } catch (IOException e) {
-            System.err.println("Could not fetch file.");
+        for(int i=0; i<ipParse.size(); i++){
+            String temp = ipParse.get(i);
+            Integer tempInt = Integer.valueOf(temp);
+            if(tempInt.intValue() > 255 || tempInt.intValue() < 0){
+                System.out.println(COULD_NOT_CONNECT);
+                System.exit(0);
+            }
         }
-    }
 
-    private void saveResponse(String filename, int filesize) throws IOException {
-        // Code copied from https://gist.github.com/CarlEkerot/2693246
-        DataInputStream dis = new DataInputStream(socket.getInputStream());
-        FileOutputStream fos = new FileOutputStream(filename);
-        byte[] buffer = new byte[4096];
-
-        int read = 0;
-        int remaining = filesize;
-        while ((read = dis.read(buffer, 0, Math.min(buffer.length, remaining))) > 0) {
-            remaining -= read;
-            fos.write(buffer, 0, read);
+        System.out.print("Enter server port number:");
+        port = Integer.valueOf(scanner.nextLine());
+        if(port < 0 || port > 65535){
+            System.out.println(INVALID_PORT);
+            System.exit(0);
         }
-        fos.close();
-    }
 
-    private String parseFileName(String command) throws IOException {
-        String[] pieces = command.split(">");
-        String filename = null;
-        if (pieces.length > 1) {
-            filename = pieces[pieces.length - 1].trim();
-        }
-        if (filename == null) throw new IOException(); // just in case
-        return filename;
-    }
-
-    private boolean validateIp(String address) {
-        return (address.startsWith("localhost"));
-    }
-
-    private boolean validatePort(int port) {
-        return true;
-    }
-
-    public static void main(String args[]) throws IOException {
+        System.out.print("Enter command: ");
+        command = scanner.nextLine();
         client_java_tcp client = new client_java_tcp();
-        boolean connected = client.connect();
-        if (!connected) return;
-        client.sendCommand();
+        
+        // ArrayList<String> commandParse = new ArrayList<String>();
+
+        // String[] commandSplit = command.split(">");
+        // for(String c : commandSplit){
+        //     String temp = c.trim();
+        //     commandParse.add(temp);
+        // }
+        // // if(commandParse.size() != 2){
+        // //     System.out.println("Invalid command was entered");
+        // //     System.exit(0);
+        // // }
+        // command = commandParse.get(0);
+        // if(commandParse.size() == 2)
+        //     fileName = commandParse.get(1);
+        client.connect(IPAddress, port, command, fileName);  
+
     }
 }
