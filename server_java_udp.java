@@ -1,43 +1,101 @@
+// Approach: https://www.codejava.net/java-se/networking/java-udp-client-server-program-example
+// Also: https://docs.oracle.com/javase/tutorial/networking/datagrams/clientServer.html
+
+// Code inspiration are same as ones used for parallel client methods
+
 import java.util.*;
 import java.net.*;
 import java.io.*;
-import java.lang.*;
+
 
 class server_java_udp{
+   // Declares scanner and udp socket references
     private DatagramSocket udpSocket;
-    private Integer clientPort;
-    private InetAddress clientAddress;
     private static Scanner scanner;
+   
+
+    // Declares IP and Port for client connection
+    private InetAddress clientAddress;
+    private Integer clientPort;
+
+    //ACK helpers
     private static final String ACK = "ACK";
     private static final byte [] bufACK = ACK.getBytes();
 
-    public void setupUDPServer(Integer port){
+
+    public static void main(String[] args) {
+    
+  
+        scanner = new Scanner(System.in);
+        String IPAddress = "";
+    
+        // Gets current IP 
+        try{
+            InetAddress ipAddress = InetAddress.getLocalHost(); 
+            IPAddress = ipAddress.getHostAddress();
+        }catch(UnknownHostException err){
+            System.out.println("Could not get server IP Address.");
+            System.exit(0);
+        }
+    
+        System.out.print("This machine's IP: ");
+        System.out.println(IPAddress);
+    
+        System.out.println("Enter port:");
+    
+        //Waits for server port to listen to
+        Integer userInput = Integer.valueOf(scanner.nextLine());
+        System.out.println("Waiting for Connection");
         
+        // Accepts client socket if input is valid
+        if((userInput > 0) && (userInput < 65535)){
+            server_java_udp server = new server_java_udp();
+            server.ServerController(userInput);
+        }
+        else{
+            System.out.println("Invalid port number.");
+        }
+    }
+
+
+    public void ServerController(Integer port){
+        
+        // Server listens to given port until program is exited
         while(true){
             try{
-                Boolean readyForData = false;
-                Boolean SUCCEED1 = false;
-                Boolean SUCCEED0 = false;
+                Boolean RecievePrepped = false;
+                Boolean check1 = false;
+                Boolean check0 = false;
+
+                // new datagram socket with inputted port 
                 this.udpSocket = new DatagramSocket(port);
 
-                String incomingLengthMessage = receiveLength();
+                // Gets length of incoming message from client 
+                String MessageLength = LengthInbound();
+
+                // socket times out after 500 millis
                 this.udpSocket.setSoTimeout(500);
-                Integer initialLength = parseLength(incomingLengthMessage);
+
+                //gets length from string format 
+                Integer startingLength = lengthDecode(MessageLength);
                 
-                if(!initialLength.equals(0)){
-                    readyForData = true;
-                    sendACK();
+                if(!startingLength.equals(0)){
+                    RecievePrepped = true;
+                    ACKoutbound();
                 }
                 else{
-                    readyForData = false;
+                    RecievePrepped = false;
                 }
 
-                if(readyForData){
-                    //System.out.println("ACK sent, ready for command");
-                    String incomingCommand = receiveCommand(initialLength);
-                    sendACK();
-                    //System.out.print("Command from client: ");
-                    //System.out.println(incomingCommand);
+                if(RecievePrepped){
+                    
+                    // Revieves command from client 
+                    String incomingCommand = CommandInbound(startingLength);
+
+                    // Sends ack back to client 
+                    ACKoutbound();
+                    
+                    // Parses the cat command: splits the command itself and the filename after '>'
                     ArrayList<String> commandParse = new ArrayList<String>();
                     String filename = "server.txt";
                     String[] commandSplit = incomingCommand.split(">");
@@ -49,38 +107,38 @@ class server_java_udp{
                     String command = commandParse.get(0);
                     if(commandParse.size() == 2)
                        filename = commandParse.get(1);
-                    String commandResult = processMessage(command);
-                    //System.out.println(commandResult);
+
+                    // Gets output of bash running comand on server
+                    String commandResult = MessageDecode(command);
+                  
+                    // Makes new file with given file name or default and stores output of command
                     BufferedWriter toFile = new BufferedWriter(new FileWriter(filename, true));
                     toFile.write(commandResult);
                     toFile.close();
                     System.out.println("File " + filename + " saved.");
-                    commandResult = processMessage("cat " + filename);
+
+                    // Reads the info in the file and sends it back to the client
+                    commandResult = MessageDecode("cat " + filename);
                     Integer outputLength = commandResult.length()*2;
                     int FAIL0 = 0;
-                    while(FAIL0 < 3 && !SUCCEED0){
-                        if(sendLength(commandResult)){
-                            //System.out.println("Success sending result length");
+
+                    // Tries to send length of output back to client up to 3 times
+                    while(FAIL0 < 3 && !check0){
+                        if(LengthOutbound(commandResult)){
                             FAIL0++;
                         }
-                        else{
-                            //System.out.println("Error");
-                        }
-                        if(receiveACK()){
-                            SUCCEED0 = true;
-                            //System.out.println("ReceivedACK!");
-                        
-                        }
-                        else{
-                            //System.out.println("Did not receive ACK");
+                        if(ACKinbound()){
+                            check0 = true;
                         }
                     }
+
+                    //Calculates the number of sends needed to send back output to client
                     Integer numberOfSends = ((outputLength/512)+1);
-                    //System.out.println("number of sends:");
-                    //System.out.println(numberOfSends);
                     for(int i=0; i<numberOfSends; i++){
                         int FAIL1 = 0;
-                        while(FAIL1 < 3 && !SUCCEED1 && SUCCEED0){
+                        
+                        // Tries to send actual message of output back to client up to 3 times
+                        while(FAIL1 < 3 && !check1 && check0){
                             String temp;
                             if(numberOfSends > 1){
                                 temp = commandResult.substring(512*i, 512*(i+1));
@@ -88,61 +146,54 @@ class server_java_udp{
                             else{
                                 temp = commandResult;
                             }
-                            if(sendCommand(temp)){
+                            if(CommandOutbound(temp)){
                                 FAIL1++;
-                                //System.out.println("Sent command results to client");
                             }
-                            else{
-                                //System.out.println("Failed to send command");
-                            }
-                            if(receiveACK()){
-                                SUCCEED1 = true;
-                                //System.out.println("Client received command results");
-                            }
-                            else{
-                                //System.out.println("Client did not receive command results");
+                            if(ACKinbound()){
+                                check1 = true;
                             }
                         }
                     }
                 }
                 else{
-                    if(!SUCCEED0 || !SUCCEED1){
+                    if(!check0 || !check1){
                         System.out.println("Command not received, listening for command again.");
                     }
                 }
             }catch(Exception e){
-                //e.printStackTrace();
                 System.out.println("Network communication error. Please try again.");
             }
             this.udpSocket.close();
         }
     }
 
-    private String receiveLength() throws SocketTimeoutException {
-        byte [] bufferLength = new byte [512];
-        DatagramPacket incoming = new DatagramPacket(bufferLength, bufferLength.length);
+    private String LengthInbound() throws SocketTimeoutException {
+       
+        // Recieves the length of following message from client
+        byte [] Length = new byte [512];
+        DatagramPacket incomingPacket = new DatagramPacket(Length, Length.length);
         try{
-            this.udpSocket.receive(incoming);
+            this.udpSocket.receive(incomingPacket);
         }catch(IOException e){
             e.printStackTrace();
         }
-        String incomingLengthMessage = new String(incoming.getData(), 0, incoming.getLength());
-        this.clientAddress = incoming.getAddress();
-        this.clientPort = incoming.getPort();
-        //System.out.println("Returning incomingLengthMessage");
-        //System.out.println(incomingLengthMessage);
-        return incomingLengthMessage;
+        String LengthMessage = new String(incomingPacket.getData(), 0, incomingPacket.getLength());
+        this.clientAddress = incomingPacket.getAddress();
+        this.clientPort = incomingPacket.getPort();
+        return LengthMessage;
     }
 
-    private Boolean sendLength(String message){
+    private Boolean LengthOutbound(String message){
+       
+       // Sends length of a message to the client in string format
         try{
-            byte[] bufResult = message.getBytes();
-            String lengthEquals = "length = ";
-            String resultLength = lengthEquals.concat(Integer.toString(bufResult.length));
-            byte[] resultLengthBuf = resultLength.getBytes();
+            byte[] Result = message.getBytes();
+            String lengthString = "length = ";
+            String Length = lengthString.concat(Integer.toString(Result.length));
+            byte[] LengthBuf = Length.getBytes();
 
-            DatagramPacket resultLengthToClient = new DatagramPacket(resultLengthBuf, resultLengthBuf.length, this.clientAddress, this.clientPort);
-            this.udpSocket.send(resultLengthToClient);
+            DatagramPacket clientPacket = new DatagramPacket(LengthBuf, LengthBuf.length, this.clientAddress, this.clientPort);
+            this.udpSocket.send(clientPacket);
         }catch(Exception e){
             e.printStackTrace();
             return false;
@@ -150,47 +201,53 @@ class server_java_udp{
         return true;
     }
 
-    private Boolean sendACK(){
+    private Boolean ACKoutbound(){
+        
+        // Sends confirmatioon ACK to client
         try{
-            DatagramPacket ackOutgoing = new DatagramPacket(bufACK, bufACK.length, this.clientAddress, this.clientPort);
-            this.udpSocket.send(ackOutgoing);
+            DatagramPacket ack= new DatagramPacket(bufACK, bufACK.length, this.clientAddress, this.clientPort);
+            this.udpSocket.send(ack);
         }catch(Exception e){
-            //e.printStackTrace();
             return false;
         }
         return true;
     }
 
-    private Boolean sendCommand(String message){
+    private Boolean CommandOutbound(String message){
+       
+        // Sends a packet with the actual output of command back to client
         try{
-            byte[] bufferCommand = message.getBytes();
-            DatagramPacket outgoingCommandPacket = new DatagramPacket(bufferCommand, bufferCommand.length, this.clientAddress, this.clientPort);
-            this.udpSocket.send(outgoingCommandPacket);
+            byte[] Command = message.getBytes();
+            DatagramPacket outPacket = new DatagramPacket(Command, Command.length, this.clientAddress, this.clientPort);
+            this.udpSocket.send(outPacket);
         }catch(Exception e){
-            //e.printStackTrace();
             return false;
         }
         return true;
     }
 
-    private Integer parseLength(String lengthMessage){
-        Integer incomingLength = 0;
+    private Integer lengthDecode(String lengthMessage){
+       
+        // Gets the the actual integer length of either input/output from string format
+        Integer Length = 0;
         String [] parseCommand = lengthMessage.split(" ");
-        ArrayList<String> parsedArgsArrList = new ArrayList<String>();
+        ArrayList<String> parsedList = new ArrayList<String>();
         for(String c : parseCommand){
-            parsedArgsArrList.add(c);
+            parsedList.add(c);
         }
-        if(parsedArgsArrList.size() == 3){
-            if(parsedArgsArrList.get(0).equals("length") && parsedArgsArrList.get(1).equals("=")){
-                incomingLength = Integer.valueOf(parsedArgsArrList.get(2));
+        if(parsedList.size() == 3){
+            if(parsedList.get(0).equals("length") && parsedList.get(1).equals("=")){
+                Length = Integer.valueOf(parsedList.get(2));
             }
         }
-        return incomingLength;
+        return Length;
     }
 
-    private Boolean receiveACK(){
+    private Boolean ACKinbound(){
+       
+       // checks if input is equal to "ACK"
         try{
-            String isACK = receiveCommand(bufACK.length);
+            String isACK = CommandInbound(bufACK.length);
             if(isACK.equals(ACK)){
                 return true;
             }
@@ -198,27 +255,30 @@ class server_java_udp{
                 return false;
             }
         }catch(Exception e){
-            //e.printStackTrace();
             return false;
         }
     }
 
-    private String receiveCommand(Integer expectedLength){
-        String receivedString;
-        byte[] receiveBuf = new byte[expectedLength];
-        DatagramPacket receivedPacket = new DatagramPacket(receiveBuf, receiveBuf.length);
+    private String CommandInbound(Integer expectedLength){
+        
+        // Recieves packet from client containing command to execute on server
+        String received;
+        byte[] Buf = new byte[expectedLength];
+        DatagramPacket receivedPacket = new DatagramPacket(Buf, Buf.length);
         try{
             this.udpSocket.receive(receivedPacket);
         }catch(IOException e){
             e.printStackTrace();
         }
-        receivedString = new String(receivedPacket.getData(), 0, receivedPacket.getLength());
-        return receivedString;
+        received = new String(receivedPacket.getData(), 0, receivedPacket.getLength());
+        return received;
     }
 
-    private String processMessage(String message){
+    private String MessageDecode(String message){
+        
+        // Processes command sent from client and returns the output of that command in a string
         String processedOutput = "";
-        //try block credit goes to https://stackoverflow.com/questions/792024/how-to-execute-system-commands-linux-bsd-using-java
+        
         try{
             Process terminalCommand = Runtime.getRuntime().exec(message);
             InputStreamReader fromTerminal = new InputStreamReader(terminalCommand.getInputStream());
@@ -238,28 +298,5 @@ class server_java_udp{
     }
 
 
-public static void main(String[] args) {
-    scanner = new Scanner(System.in);
-    String IPAddress = "";
-    try{
-        InetAddress ipAddress = InetAddress.getLocalHost(); 
-        IPAddress = ipAddress.getHostAddress();
-    }catch(UnknownHostException uhe){
-        System.out.println("Could not get server IP Address.");
-        System.exit(0);
-    }
-    System.out.print("This machine's IP: ");
-    System.out.println(IPAddress);
 
-    System.out.println("Enter port:");
-    Integer userInput = Integer.valueOf(scanner.nextLine());
-
-    if((userInput > 0) && (userInput < 65535)){
-        server_java_udp server = new server_java_udp();
-        server.setupUDPServer(userInput);
-    }
-    else{
-        System.out.println("Invalid port number.");
-    }
-}
 }
